@@ -1,0 +1,255 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v2.0.0)'
+        required: true
+        default: 'v2.0.0'
+
+env:
+  DOCKER_IMAGE_NAME: telegram-monitor
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================
+  # 构建 Docker 镜像
+  # ============================================
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+          no-cache: true
+
+  # ============================================
+  # 构建 Linux 二进制
+  # ============================================
+  build-linux:
+    name: Build Linux Binary
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary with PyInstaller
+        run: |
+          pyinstaller --onefile \
+            --name telegram-monitor-linux-x64 \
+            --add-data "bot:bot" \
+            --add-data "core:core" \
+            --add-data "services:services" \
+            --hidden-import=telegram \
+            --hidden-import=telethon \
+            --hidden-import=sqlalchemy \
+            --hidden-import=aiosqlite \
+            --hidden-import=httpx \
+            --hidden-import=telegram_monitor_ads \
+            main.py
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/telegram-monitor-linux-x64
+
+  # ============================================
+  # 构建 Windows 二进制
+  # ============================================
+  build-windows:
+    name: Build Windows Binary
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary with PyInstaller
+        run: |
+          pyinstaller --onefile `
+            --name telegram-monitor-windows-x64 `
+            --add-data "bot;bot" `
+            --add-data "core;core" `
+            --add-data "services;services" `
+            --hidden-import=telegram `
+            --hidden-import=telethon `
+            --hidden-import=sqlalchemy `
+            --hidden-import=aiosqlite `
+            --hidden-import=httpx `
+            --hidden-import=telegram_monitor_ads `
+            main.py
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/telegram-monitor-windows-x64.exe
+
+  # ============================================
+  # 创建 Release
+  # ============================================
+  release:
+    name: Create Release
+    needs: [docker, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: ./artifacts/linux
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binary
+          path: ./artifacts/windows
+
+      - name: Prepare release files
+        run: |
+          chmod +x ./artifacts/linux/telegram-monitor-linux-x64
+          
+          # 创建带配置文件的压缩包
+          mkdir -p release/telegram-monitor
+          cp .env.example release/telegram-monitor/.env.example
+          cp README.md release/telegram-monitor/
+          cp LICENSE release/telegram-monitor/
+          
+          # Linux 压缩包
+          cp ./artifacts/linux/telegram-monitor-linux-x64 release/telegram-monitor/
+          cd release && tar -czvf telegram-monitor-linux-x64.tar.gz telegram-monitor && cd ..
+          rm release/telegram-monitor/telegram-monitor-linux-x64
+          
+          # Windows 压缩包
+          cp ./artifacts/windows/telegram-monitor-windows-x64.exe release/telegram-monitor/
+          cd release && zip -r telegram-monitor-windows-x64.zip telegram-monitor && cd ..
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd release
+          sha256sum telegram-monitor-linux-x64.tar.gz > SHA256SUMS.txt
+          sha256sum telegram-monitor-windows-x64.zip >> SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Telegram Monitor ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## 🚀 Telegram Monitor ${{ steps.version.outputs.VERSION }}
+            
+            ### 📦 下载方式
+            
+            | 方式 | 说明 |
+            |------|------|
+            | **Docker** | `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/telegram-monitor:${{ steps.version.outputs.VERSION }}` |
+            | **Linux 二进制** | 下载 `telegram-monitor-linux-x64.tar.gz` |
+            | **Windows 二进制** | 下载 `telegram-monitor-windows-x64.zip` |
+            | **源码** | 下载 Source code |
+            
+            ### 🐳 Docker 快速启动
+            ```bash
+            # 创建配置文件
+            wget https://raw.githubusercontent.com/${{ github.repository }}/main/.env.example -O .env
+            # 编辑配置
+            nano .env
+            # 启动容器
+            docker run -d --name telegram-monitor --env-file .env ${{ secrets.DOCKERHUB_USERNAME }}/telegram-monitor
+            ```
+            
+            ### 📝 更新日志
+            - 查看完整更新日志请访问 [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+            
+            ---
+            📢 [关注频道](https://t.me/langgefabu) | 💬 [社区交流](https://t.me/langgepython)
+          files: |
+            release/telegram-monitor-linux-x64.tar.gz
+            release/telegram-monitor-windows-x64.zip
+            release/SHA256SUMS.txt
+          draft: false
+          prerelease: false

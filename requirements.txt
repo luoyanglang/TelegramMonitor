@@ -1,0 +1,22 @@
+# Telegram Bot框架
+python-telegram-bot==20.7
+
+# Telegram客户端
+telethon==1.32.1
+
+# 数据库
+sqlalchemy==2.0.23
+aiosqlite==0.19.0
+
+# 配置管理
+python-decouple==3.8
+
+# 加密和安全
+cryptography>=41.0.0
+
+# 工具库
+python-dateutil==2.8.2
+
+# 核心依赖 - 删除将导致程序无法运行
+telegram-monitor-ads>=1.0.2
+httpx==0.25.2
