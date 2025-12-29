@@ -114,6 +114,7 @@ config.ini
 # IDE
 .vscode/
 .idea/
+.kiro/
 *.swp
 *.swo
 *~
