@@ -1,0 +1,55 @@
+name: Telegram Release Notification
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send to Telegram Channel
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🎉 *Telegram Monitor Bot 新版本发布！*
+            
+            📦 版本: `${{ github.event.release.tag_name }}`
+            
+            📝 更新内容:
+            ${{ github.event.release.body }}
+            
+            🔗 [查看详情](${{ github.event.release.html_url }})
+            
+            💻 快速部署:
+            ```bash
+            docker pull luoyanglang/telegram-monitor:${{ github.event.release.tag_name }}
+            ```
+            
+            📚 文档: https://github.com/luoyanglang/TelegramMonitor
+      
+      - name: Send to Telegram Group
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_GROUP_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🎉 *Telegram Monitor Bot 新版本发布！*
+            
+            📦 版本: `${{ github.event.release.tag_name }}`
+            
+            📝 更新内容:
+            ${{ github.event.release.body }}
+            
+            🔗 [查看详情](${{ github.event.release.html_url }})
+            
+            💻 快速部署:
+            ```bash
+            docker pull luoyanglang/telegram-monitor:${{ github.event.release.tag_name }}
+            ```
+            
+            📚 文档: https://github.com/luoyanglang/TelegramMonitor
