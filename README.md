@@ -49,8 +49,6 @@ docker run -d \
   luoyanglang/telegram-monitor:latest
 ```
 
-**其他部署方式** → [部署文档](wiki/deploy/)
-
 ### 3. 开始使用
 
 1. 在 Telegram 中找到你的 Bot
@@ -61,9 +59,9 @@ docker run -d \
 
 | 文档 | 说明 |
 |------|------|
-| [部署指南](wiki/deploy/) | Docker、1Panel、宝塔、源码等多种部署方式 |
-| [配置说明](wiki/config/) | Bot Token、API 凭证、代理等配置获取与设置 |
-| [使用教程](wiki/usage/) | 账号管理、关键词、监控、黑名单等功能详解 |
+| [部署指南](wiki/index.md#部署指南) | Docker、1Panel、宝塔、源码等多种部署方式 |
+| [配置说明](wiki/index.md#配置说明) | Bot Token、API 凭证、代理等配置获取与设置 |
+| [使用教程](wiki/index.md#使用教程) | 账号管理、关键词、监控、黑名单等功能详解 |
 | [常见问题](wiki/faq.md) | 遇到问题先看这里 |
 
 ## 📢 交流反馈

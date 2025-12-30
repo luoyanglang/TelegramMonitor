@@ -19,6 +19,7 @@ from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, P
 from telethon.tl.types import User, Chat, Channel, Dialog
 
 from core.database import get_config, set_config
+from core.utils import format_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -743,7 +744,7 @@ class TelegramClientManager:
 用户: {user_link}
 来源: 🔍 {chat_link}
 内容: {styled_text}
-时间: {message.date.strftime('%Y-%m-%d %H:%M:%S')}
+时间: {format_datetime(message.date)}
 命中关键词: {', '.join([kw.content for kw in matched_keywords])}
 """
             
