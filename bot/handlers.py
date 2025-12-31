@@ -430,6 +430,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_phone_input(update, context, message_text)
     elif user_state.current_state == "waiting_verification":
         await handle_verification_input(update, context, message_text)
+    elif user_state.current_state == "waiting_email_code":
+        await handle_email_code_input(update, context, message_text)
     elif user_state.current_state == "waiting_password":
         await handle_password_input(update, context, message_text)
     elif user_state.current_state == "waiting_proxy_url":
@@ -554,7 +556,18 @@ async def handle_verification_input(update: Update, context: ContextTypes.DEFAUL
         await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
         await set_user_state(user_id, "idle")
     else:
-        if "密码" in message:
+        if "邮箱" in message:
+            # 需要邮箱验证
+            text = f"""
+📧 **邮箱验证**
+
+{message}
+
+请输入收到的邮箱验证码:
+"""
+            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+            await set_user_state(user_id, "waiting_email_code", phone)
+        elif "密码" in message:
             # 需要两步验证密码
             text = f"""
 🔐 **两步验证**
@@ -573,6 +586,48 @@ async def handle_verification_input(update: Update, context: ContextTypes.DEFAUL
 {message}
 
 请重新输入验证码:
+"""
+            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+
+
+async def handle_email_code_input(update: Update, context: ContextTypes.DEFAULT_TYPE, email_code: str):
+    """处理邮箱验证码输入"""
+    user_id = update.effective_user.id
+    
+    # 验证邮箱验证码
+    success, message = await telegram_service.verify_email_code(email_code)
+    
+    if success:
+        # 验证成功
+        text = f"""
+✅ **邮箱验证成功**
+
+{message}
+
+账号已成功登录！
+"""
+        await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+        await set_user_state(user_id, "idle")
+    else:
+        if "密码" in message:
+            # 需要两步验证密码
+            text = f"""
+🔐 **两步验证**
+
+{message}
+
+请输入您的两步验证密码:
+"""
+            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+            await set_user_state(user_id, "waiting_password")
+        else:
+            # 验证失败
+            text = f"""
+❌ **邮箱验证失败**
+
+{message}
+
+请重新输入邮箱验证码:
 """
             await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
 

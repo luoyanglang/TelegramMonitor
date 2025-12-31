@@ -29,6 +29,10 @@ class TelegramService:
         """验证验证码"""
         return await self.client_manager.verify_code(phone, code)
     
+    async def verify_email_code(self, email_code: str) -> Tuple[bool, str]:
+        """验证邮箱验证码"""
+        return await self.client_manager.verify_email_code(email_code)
+    
     async def verify_password(self, password: str) -> Tuple[bool, str]:
         """验证两步验证密码"""
         return await self.client_manager.verify_password(password)

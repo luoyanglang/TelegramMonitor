@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from decouple import config
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PasswordHashInvalidError
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PasswordHashInvalidError, EmailUnconfirmedError
 from telethon.tl.types import User, Chat, Channel, Dialog
 
 from core.database import get_config, set_config
@@ -315,12 +315,31 @@ class TelegramClientManager:
             
             return False, "登录失败，请检查验证码"
             
+        except EmailUnconfirmedError as e:
+            return False, "需要输入邮箱验证码"
         except SessionPasswordNeededError:
             return False, "需要输入两步验证密码"
         except PhoneCodeInvalidError:
             return False, "验证码无效，请重新输入"
         except Exception as e:
             logger.error(f"验证码验证失败: {e}")
+            return False, f"验证失败: {str(e)}"
+    
+    async def verify_email_code(self, email_code: str) -> Tuple[bool, str]:
+        """验证邮箱验证码"""
+        try:
+            await self.client.sign_in(email_code=email_code)
+            
+            if await self.client.is_user_authorized():
+                await self.load_dialogs()
+                return True, "登录成功"
+            
+            return False, "登录失败，请检查邮箱验证码"
+            
+        except SessionPasswordNeededError:
+            return False, "需要输入两步验证密码"
+        except Exception as e:
+            logger.error(f"邮箱验证失败: {e}")
             return False, f"验证失败: {str(e)}"
     
     async def verify_password(self, password: str) -> Tuple[bool, str]:
