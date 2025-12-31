@@ -19,7 +19,7 @@ docker run -d \
   -e TELEGRAM_API_ID=你的API_ID \
   -e TELEGRAM_API_HASH=你的API_Hash \
   -e AUTHORIZED_USER_ID=你的用户ID \
-  luoyanglang/telegram-monitor:latest
+  luoyanglangge/telegram-monitor:latest
 ```
 
 ## 使用 docker-compose
@@ -30,7 +30,7 @@ docker run -d \
 version: '3'
 services:
   telegram-monitor:
-    image: luoyanglang/telegram-monitor:latest
+    image: luoyanglangge/telegram-monitor:latest
     container_name: telegram-monitor
     restart: unless-stopped
     volumes:
@@ -71,7 +71,7 @@ docker restart telegram-monitor
 docker rm -f telegram-monitor
 
 # 更新镜像
-docker pull luoyanglang/telegram-monitor:latest
+docker pull luoyanglangge/telegram-monitor:latest
 ```
 
 ## 配置代理
@@ -88,7 +88,7 @@ docker run -d \
   -e PROXY_TYPE=socks5 \
   -e PROXY_HOST=host.docker.internal \
   -e PROXY_PORT=1080 \
-  luoyanglang/telegram-monitor:latest
+  luoyanglangge/telegram-monitor:latest
 ```
 
 > 注意：Docker 容器内访问宿主机代理，使用 `host.docker.internal` 而不是 `127.0.0.1`

@@ -39,7 +39,7 @@ docker run -d \
   -e PROXY_TYPE=socks5 \
   -e PROXY_HOST=127.0.0.1 \
   -e PROXY_PORT=1080 \
-  luoyanglang/telegram-monitor:latest
+  luoyanglangge/telegram-monitor:latest
 ```
 
 ## 常见问题

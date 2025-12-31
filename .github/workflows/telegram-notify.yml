@@ -26,7 +26,7 @@ jobs:
             
             💻 快速部署:
             ```bash
-            docker pull luoyanglang/telegram-monitor:${{ github.event.release.tag_name }}
+            docker pull luoyanglangge/telegram-monitor:${{ github.event.release.tag_name }}
             ```
             
             📚 文档: https://github.com/luoyanglang/TelegramMonitor
@@ -49,7 +49,7 @@ jobs:
             
             💻 快速部署:
             ```bash
-            docker pull luoyanglang/telegram-monitor:${{ github.event.release.tag_name }}
+            docker pull luoyanglangge/telegram-monitor:${{ github.event.release.tag_name }}
             ```
             
             📚 文档: https://github.com/luoyanglang/TelegramMonitor

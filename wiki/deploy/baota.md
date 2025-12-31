@@ -27,7 +27,7 @@
 点击 **镜像** → **拉取镜像**，输入：
 
 ```
-luoyanglang/telegram-monitor:latest
+luoyanglangge/telegram-monitor:latest
 ```
 
 点击拉取，等待完成。

@@ -28,7 +28,7 @@
 | 字段 | 填写内容 |
 |------|----------|
 | 名称 | `telegram-monitor` |
-| 镜像 | `luoyanglang/telegram-monitor:latest` |
+| 镜像 | `luoyanglangge/telegram-monitor:latest` |
 | 重启策略 | `unless-stopped` |
 
 ### 4. 配置环境变量
@@ -77,7 +77,7 @@
 
 可能是网络问题，尝试：
 1. 在 1Panel 中配置 Docker 镜像加速
-2. 或手动拉取：终端执行 `docker pull luoyanglang/telegram-monitor:latest`
+2. 或手动拉取：终端执行 `docker pull luoyanglangge/telegram-monitor:latest`
 
 ### 容器启动后立即停止
 

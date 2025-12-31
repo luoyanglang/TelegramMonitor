@@ -79,7 +79,7 @@
 
 **Docker 部署：**
 ```bash
-docker pull luoyanglang/telegram-monitor:latest
+docker pull luoyanglangge/telegram-monitor:latest
 docker stop telegram-monitor
 docker rm telegram-monitor
 # 重新运行 docker run 命令
