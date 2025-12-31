@@ -24,7 +24,7 @@
 
 | 平台 | 下载链接 |
 |------|----------|
-| 🐳 Docker | `docker pull luoyanglang/telegram-monitor:latest` |
+| 🐳 Docker | `docker pull luoyanglangge/telegram-monitor:latest` |
 | 🐧 Linux | [下载 Linux 版本](https://github.com/luoyanglang/TelegramMonitor/releases/latest) |
 | 🪟 Windows | [下载 Windows 版本](https://github.com/luoyanglang/TelegramMonitor/releases/latest) |
 | 📦 源码 | [下载源码](https://github.com/luoyanglang/TelegramMonitor/archive/refs/heads/main.zip) |
@@ -46,7 +46,7 @@ docker run -d \
   -e TELEGRAM_API_ID=你的API_ID \
   -e TELEGRAM_API_HASH=你的API_Hash \
   -e AUTHORIZED_USER_ID=你的用户ID \
-  luoyanglang/telegram-monitor:latest
+  luoyanglangge/telegram-monitor:latest
 ```
 
 ### 3. 开始使用
