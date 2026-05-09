@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag (for example: v2.0.0)"
+        description: "Version tag (for example: v2.2.0)"
         required: true
-        default: "v2.0.0"
+        default: "v2.2.0"
 
 env:
   PYTHON_VERSION: "3.11"

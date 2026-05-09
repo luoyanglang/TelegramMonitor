@@ -13,7 +13,7 @@ CHANGELOG = """# Changelog
 
 ## [Unreleased]
 
-## [2.0.1] - 2026-05-09
+## [2.2.0] - 2026-05-09
 
 ### Added
 - Added multiple administrator support with `AUTHORIZED_USER_IDS`.
@@ -35,14 +35,14 @@ CHANGELOG = """# Changelog
 
 class ReleaseBodyTests(unittest.TestCase):
     def test_extract_changelog_section_accepts_tag_version(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.0.1")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
 
-        self.assertIn("## [2.0.1] - 2026-05-09", section)
+        self.assertIn("## [2.2.0] - 2026-05-09", section)
         self.assertIn("Fixed invalid message links", section)
         self.assertNotIn("Initial release", section)
 
     def test_extract_highlights_returns_first_four_user_facing_items(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.0.1")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
 
         self.assertEqual(
             build_release_body.extract_highlights(section),
@@ -55,9 +55,9 @@ class ReleaseBodyTests(unittest.TestCase):
         )
 
     def test_build_release_body_puts_highlights_before_downloads(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.0.1")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
         body = build_release_body.build_release_body(
-            "v2.0.1",
+            "v2.2.0",
             section,
             "luoyanglang/TelegramMonitor",
             "luoyanglangge",
@@ -68,7 +68,7 @@ class ReleaseBodyTests(unittest.TestCase):
         self.assertIn("- Added multiple administrator support with `AUTHORIZED_USER_IDS`.", body)
         self.assertIn("### Update Notes", body)
         self.assertIn("### Downloads", body)
-        self.assertIn("docker pull luoyanglangge/telegram-monitor:v2.0.1", body)
+        self.assertIn("docker pull luoyanglangge/telegram-monitor:v2.2.0", body)
 
 
 if __name__ == "__main__":
