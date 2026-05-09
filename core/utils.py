@@ -16,6 +16,15 @@ def mask_sensitive_id(value: object, visible: int = 3) -> str:
     return f"{text[:visible]}***{text[-visible:]}"
 
 
+def redact_sensitive_text(text: object, secrets: list[object]) -> str:
+    """Redact known secret values before logging external exception text."""
+    redacted = str(text)
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(str(secret), "<redacted>")
+    return redacted
+
+
 def get_current_time(timezone: str = 'Asia/Shanghai', format: str = '%Y-%m-%d %H:%M:%S') -> str:
     """
     获取当前时间

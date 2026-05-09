@@ -15,7 +15,7 @@ from telegram.ext import Application
 from bot.handlers import setup_handlers
 from core.database import init_database
 from core.ad_integration import init_ad_system, shutdown_ad_system
-from core.utils import mask_sensitive_id
+from core.utils import mask_sensitive_id, redact_sensitive_text
 
 
 # 配置日志
@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 # Avoid leaking bot tokens in HTTP client request URLs at INFO level.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def redact_log_text(text: object) -> str:
+    """Remove configured secrets from log messages."""
+    return redact_sensitive_text(
+        text,
+        [
+            config('BOT_TOKEN', default=''),
+            config('TELEGRAM_API_HASH', default=''),
+        ],
+    )
 
 
 async def post_init(app: Application) -> None:
@@ -64,7 +75,7 @@ async def post_init(app: Application) -> None:
         logger.info(f"启动消息已发送给用户 {mask_sensitive_id(authorized_user_id)}")
         
     except Exception as e:
-        logger.warning(f"发送启动消息失败: {e}")
+        logger.warning(f"发送启动消息失败: {redact_log_text(e)}")
 
 
 async def post_shutdown(app: Application) -> None:
@@ -143,7 +154,7 @@ def run() -> int:
         logger.info("Bot已停止")
         return 0
     except Exception as e:
-        logger.critical(f"未捕获的异常: {e}")
+        logger.critical(f"未捕获的异常: {redact_log_text(e)}")
         if loop is not None and not loop.is_closed():
             loop.run_until_complete(shutdown_ad_system())
         return 1
