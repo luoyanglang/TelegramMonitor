@@ -4,8 +4,15 @@
 """
 
 from datetime import datetime
-from typing import Optional
+from html import escape as html_escape
+import math
+from typing import Optional, Sequence, TypeVar
 import pytz
+
+T = TypeVar("T")
+
+
+MARKDOWN_SPECIAL_CHARS = "\\_*[]()`"
 
 
 def mask_sensitive_id(value: object, visible: int = 3) -> str:
@@ -23,6 +30,70 @@ def redact_sensitive_text(text: object, secrets: list[object]) -> str:
         if secret:
             redacted = redacted.replace(str(secret), "<redacted>")
     return redacted
+
+
+def escape_markdown_text(text: object) -> str:
+    """Escape text used in Telegram Markdown fields."""
+    escaped = str(text or "")
+    for char in MARKDOWN_SPECIAL_CHARS:
+        escaped = escaped.replace(char, f"\\{char}")
+    return escaped
+
+
+def escape_html_text(text: object) -> str:
+    """Escape text used in Telegram HTML parse mode."""
+    return html_escape(str(text or ""), quote=False)
+
+
+def build_telegram_user_link(name: object, username: object = None, user_id: object = None) -> str:
+    """Build a best-effort Telegram Markdown user link."""
+    display_name = escape_markdown_text(name or "Unknown")
+    if username:
+        username_text = str(username).strip().lstrip("@")
+        if username_text:
+            return f"[{display_name}](https://t.me/{username_text})"
+
+    if user_id not in (None, ""):
+        return f"[{display_name}](tg://user?id={int(user_id)})"
+
+    return display_name
+
+
+def build_telegram_text_link(label: object, url: str) -> str:
+    """Build a Telegram Markdown text link with an escaped label."""
+    return f"[{escape_markdown_text(label)}]({url})"
+
+
+def build_telegram_html_link(label: object, url: str) -> str:
+    """Build a Telegram HTML text link with escaped label and href."""
+    escaped_url = html_escape(str(url), quote=True)
+    return f'<a href="{escaped_url}">{escape_html_text(label)}</a>'
+
+
+def build_telegram_user_html_link(name: object, username: object = None, user_id: object = None) -> str:
+    """Build a best-effort Telegram HTML user link."""
+    display_name = name or "Unknown"
+    if username:
+        username_text = str(username).strip().lstrip("@")
+        if username_text:
+            return build_telegram_html_link(display_name, f"https://t.me/{username_text}")
+
+    if user_id not in (None, ""):
+        return build_telegram_html_link(display_name, f"tg://user?id={int(user_id)}")
+
+    return escape_html_text(display_name)
+
+
+def paginate_items(items: Sequence[T], page: int, page_size: int) -> tuple[list[T], int, int]:
+    """Return a clamped page slice and pagination metadata."""
+    if page_size <= 0:
+        raise ValueError("page_size must be greater than zero")
+
+    total_pages = max(1, math.ceil(len(items) / page_size))
+    current_page = min(max(page, 0), total_pages - 1)
+    start = current_page * page_size
+    end = start + page_size
+    return list(items[start:end]), current_page, total_pages
 
 
 def get_current_time(timezone: str = 'Asia/Shanghai', format: str = '%Y-%m-%d %H:%M:%S') -> str:

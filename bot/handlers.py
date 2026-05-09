@@ -19,7 +19,7 @@ from telegram.ext import (
 from bot.keyboards import *
 from core.auth import load_authorized_user_ids
 from core.database import get_user_state, set_user_state
-from core.utils import mask_sensitive_id
+from core.utils import mask_sensitive_id, paginate_items
 from services.keyword_service import KeywordService
 from services.telegram_service import TelegramService
 from services.monitor_service import MonitorService
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # 授权用户ID
 AUTHORIZED_USER_IDS = load_authorized_user_ids()
+TARGET_PAGE_SIZE = 8
 
 # 服务实例
 keyword_service = KeywordService()
@@ -199,6 +200,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_monitor_menu(update, context)
     elif data == "set_target":
         await show_target_selection(update, context)
+    elif data.startswith("target_page_"):
+        page = int(data.split('_')[-1])
+        await show_target_selection(update, context, page)
     elif data == "monitor_status":
         await show_monitor_status(update, context)
     elif data == "start_monitor":
@@ -1087,7 +1091,7 @@ async def show_keyword_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await safe_edit_message(update, context, text, InlineKeyboardMarkup(keyboard))
 
 
-async def show_target_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_target_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     """显示目标群组选择"""
     # 检查是否已登录
     if not await telegram_service.is_logged_in():
@@ -1099,35 +1103,51 @@ async def show_target_selection(update: Update, context: ContextTypes.DEFAULT_TY
         await safe_edit_message(update, context, text, back_cancel_menu("monitor_menu"))
         return
     
-    # 获取可用聊天列表
+    # 获取可用目标列表
     chats = await telegram_service.get_available_chats()
     
     if not chats:
         text = """
 ⚠️ **无可用群组**
 
-未找到可发送消息的群组或频道。
+未找到当前账号可管理或可发帖的群组/频道。
 
 请确保：
 1. 您已加入相关群组/频道
-2. 在群组中有发送消息的权限
-3. 在频道中有管理员权限
+2. 在群组中是管理员
+3. 在频道中有发帖权限
 """
         await safe_edit_message(update, context, text, back_cancel_menu("monitor_menu"))
         return
+
+    page_chats, current_page, total_pages = paginate_items(chats, page, TARGET_PAGE_SIZE)
     
-    text = """
+    text = f"""
 🎯 **选择目标群组**
 
-请选择要转发消息的目标群组或频道:
+请选择当前账号可管理或可发帖的群组/频道作为转发目标。
+
+找到 {len(chats)} 个可用目标
+当前第 {current_page + 1}/{total_pages} 页
 
 """
     
     keyboard = []
-    for chat in chats[:10]:  # 限制显示前10个
+    for chat in page_chats:
         chat_emoji = "📢" if chat['type'] == '频道' else "👥"
         button_text = f"{chat_emoji} {chat['title'][:20]}{'...' if len(chat['title']) > 20 else ''}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"set_target_{chat['id']}")])
+
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ 上页", callback_data=f"target_page_{current_page - 1}"))
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("➡️ 下页", callback_data=f"target_page_{current_page + 1}"))
+
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    keyboard.append([InlineKeyboardButton(f"📄 {current_page + 1}/{total_pages}", callback_data="noop")])
     
     keyboard.append([
         InlineKeyboardButton("🔙 返回", callback_data="monitor_menu"),
