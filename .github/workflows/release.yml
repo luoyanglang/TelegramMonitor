@@ -216,38 +216,25 @@ jobs:
           sha256sum telegram-monitor-windows-x64.zip >> SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Generate release body from changelog
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          REPO: ${{ github.repository }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_IMAGE_NAME: ${{ secrets.DOCKER_IMAGE_NAME }}
+        run: |
+          python .github/scripts/build_release_body.py \
+            --version "$VERSION" \
+            --output release/RELEASE_BODY.md
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
           name: Telegram Monitor ${{ steps.version.outputs.VERSION }}
-          body: |
-            ## Telegram Monitor ${{ steps.version.outputs.VERSION }}
-
-            ### Downloads
-
-            | Type | Details |
-            |------|---------|
-            | Docker | `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKER_IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}` |
-            | Linux binary | Download `telegram-monitor-linux-x64.tar.gz` |
-            | Windows binary | Download `telegram-monitor-windows-x64.zip` |
-            | Source code | Download the GitHub source archive |
-
-            ### Quick Start
-
-            ```bash
-            wget https://raw.githubusercontent.com/${{ github.repository }}/main/.env.example -O .env
-            nano .env
-            docker run -d --name telegram-monitor --env-file .env ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKER_IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
-            ```
-
-            ### Update Notes
-
-            - Review the full release page for version details and release assets.
-
-            ---
-            [Project Channel](https://t.me/langgefabu) | [Community Group](https://t.me/langgepython)
+          body_path: release/RELEASE_BODY.md
           files: |
             release/telegram-monitor-linux-x64.tar.gz
             release/telegram-monitor-windows-x64.zip
