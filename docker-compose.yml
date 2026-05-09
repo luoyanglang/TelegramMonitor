@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   telegram-monitor:
     build: .
@@ -10,10 +8,11 @@ services:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
       - AUTHORIZED_USER_ID=${AUTHORIZED_USER_ID}
+      - AUTHORIZED_USER_IDS=${AUTHORIZED_USER_IDS:-}
       - DATABASE_PATH=/app/data/telegram_monitor.db
       - SESSION_PATH=/app/data/sessions
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - AD_PRIMARY_URL=${AD_PRIMARY_URL}
+      - AD_PRIMARY_URL=${AD_PRIMARY_URL:-}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
