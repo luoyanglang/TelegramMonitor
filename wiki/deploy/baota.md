@@ -61,6 +61,8 @@ BOT_TOKEN=你的Token
 TELEGRAM_API_ID=你的API_ID
 TELEGRAM_API_HASH=你的API_Hash
 AUTHORIZED_USER_ID=你的用户ID
+# 可选：多管理员，英文逗号分隔；设置后优先于 AUTHORIZED_USER_ID
+# AUTHORIZED_USER_IDS=管理员1用户ID,管理员2用户ID
 ```
 
 <!-- TODO: 截图 - 环境变量配置 -->

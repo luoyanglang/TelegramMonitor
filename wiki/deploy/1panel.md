@@ -41,6 +41,7 @@
 | `TELEGRAM_API_ID` | 你的 API ID |
 | `TELEGRAM_API_HASH` | 你的 API Hash |
 | `AUTHORIZED_USER_ID` | 你的用户 ID |
+| `AUTHORIZED_USER_IDS` | 可选，多管理员用户 ID，英文逗号分隔 |
 
 ![alt text](image-3.png)
 

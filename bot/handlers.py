@@ -8,7 +8,6 @@ import json
 import logging
 from typing import Dict, Any, Tuple
 
-from decouple import config
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -18,6 +17,7 @@ from telegram.ext import (
 )
 
 from bot.keyboards import *
+from core.auth import load_authorized_user_ids
 from core.database import get_user_state, set_user_state
 from core.utils import mask_sensitive_id
 from services.keyword_service import KeywordService
@@ -28,7 +28,7 @@ from services.blacklist_service import BlacklistService
 logger = logging.getLogger(__name__)
 
 # 授权用户ID
-AUTHORIZED_USER_ID = config('AUTHORIZED_USER_ID', cast=int)
+AUTHORIZED_USER_IDS = load_authorized_user_ids()
 
 # 服务实例
 keyword_service = KeywordService()
@@ -42,8 +42,9 @@ def check_authorization(func):
     @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        logger.debug(f"授权检查: 用户 {mask_sensitive_id(user_id)}, 授权用户 {mask_sensitive_id(AUTHORIZED_USER_ID)}")
-        if user_id != AUTHORIZED_USER_ID:
+        masked_admins = ", ".join(mask_sensitive_id(admin_id) for admin_id in sorted(AUTHORIZED_USER_IDS))
+        logger.debug(f"授权检查: 用户 {mask_sensitive_id(user_id)}, 授权用户 {masked_admins}")
+        if user_id not in AUTHORIZED_USER_IDS:
             logger.warning(f"未授权用户尝试访问: {mask_sensitive_id(user_id)}")
             if update.message:
                 await update.message.reply_text("❌ 您没有权限使用此Bot")

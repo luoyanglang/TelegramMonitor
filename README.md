@@ -55,6 +55,8 @@ docker run -d \
 2. 发送 `/start`
 3. 按菜单提示操作即可
 
+`AUTHORIZED_USER_ID` 保持兼容单管理员；如需多管理员共同使用，设置 `AUTHORIZED_USER_IDS`，用英文逗号分隔多个 Telegram 用户 ID。
+
 ## 📚 文档
 
 | 文档 | 说明 |

@@ -13,6 +13,7 @@ from decouple import config
 from telegram.ext import Application
 
 from bot.handlers import setup_handlers
+from core.auth import load_authorized_user_ids
 from core.database import init_database
 from core.ad_integration import init_ad_system, shutdown_ad_system
 from core.utils import mask_sensitive_id, redact_sensitive_text
@@ -49,8 +50,6 @@ async def post_init(app: Application) -> None:
     try:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
-        authorized_user_id = config('AUTHORIZED_USER_ID', cast=int)
-        
         welcome_text = """👋 欢迎使用 Telegram Monitor Bot，一款更好用的个人群组/频道/私聊关键词监听系统，如果您看到此消息，说明机器人已经启动成功！
 
 📌 当前版本：2.0.0
@@ -66,13 +65,14 @@ async def post_init(app: Application) -> None:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await app.bot.send_message(
-            chat_id=authorized_user_id,
-            text=welcome_text,
-            reply_markup=reply_markup,
-            disable_web_page_preview=False
-        )
-        logger.info(f"启动消息已发送给用户 {mask_sensitive_id(authorized_user_id)}")
+        for authorized_user_id in sorted(load_authorized_user_ids()):
+            await app.bot.send_message(
+                chat_id=authorized_user_id,
+                text=welcome_text,
+                reply_markup=reply_markup,
+                disable_web_page_preview=False
+            )
+            logger.info(f"启动消息已发送给用户 {mask_sensitive_id(authorized_user_id)}")
         
     except Exception as e:
         logger.warning(f"发送启动消息失败: {redact_log_text(e)}")
@@ -99,9 +99,9 @@ def validate_required_config() -> str:
     bot_token = config('BOT_TOKEN')
     api_id = config('TELEGRAM_API_ID', cast=int)
     api_hash = config('TELEGRAM_API_HASH')
-    authorized_user_id = config('AUTHORIZED_USER_ID', cast=int)
+    authorized_user_ids = load_authorized_user_ids()
 
-    if not all([bot_token, api_id, api_hash, authorized_user_id]):
+    if not all([bot_token, api_id, api_hash, authorized_user_ids]):
         raise Exception("请检查环境变量配置！")
 
     return bot_token
