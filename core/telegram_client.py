@@ -10,6 +10,7 @@ import logging
 import os
 import random
 import uuid
+from datetime import datetime, timezone
 from time import monotonic
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -25,9 +26,109 @@ from telethon.network.connection import (
 from telethon.tl.types import User, Chat, Channel, Dialog
 
 from core.database import get_config, set_config
-from core.utils import format_datetime
+from core.utils import (
+    build_telegram_html_link,
+    build_telegram_user_html_link,
+    escape_html_text,
+    format_datetime,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _has_admin_rights(entity) -> bool:
+    return bool(getattr(entity, "creator", False) or getattr(entity, "admin_rights", None))
+
+
+def build_target_chat_info(entity, entity_kind: str) -> Optional[Dict]:
+    """Return target chat info when the current account can manage/post to it."""
+    if entity_kind == "channel":
+        if getattr(entity, "broadcast", False):
+            admin_rights = getattr(entity, "admin_rights", None)
+            can_post = bool(
+                getattr(entity, "creator", False)
+                or (admin_rights and getattr(admin_rights, "post_messages", False))
+            )
+            if not can_post:
+                return None
+            chat_type = "频道"
+        else:
+            banned_rights = getattr(entity, "banned_rights", None)
+            if banned_rights and getattr(banned_rights, "send_messages", False):
+                return None
+            if not _has_admin_rights(entity):
+                return None
+            chat_type = "群组"
+    elif entity_kind == "chat":
+        if getattr(entity, "kicked", False) or getattr(entity, "left", False):
+            return None
+        if not _has_admin_rights(entity):
+            return None
+        chat_type = "群组"
+    else:
+        return None
+
+    return {
+        'id': entity.id,
+        'title': entity.title,
+        'type': chat_type,
+        'username': getattr(entity, 'username', None),
+    }
+
+
+def normalize_bot_api_chat_id(chat_id: Optional[int]) -> Optional[int]:
+    """Normalize Telethon positive channel IDs to Bot API supergroup IDs."""
+    if chat_id is None:
+        return None
+    chat_id = int(chat_id)
+    if chat_id > 0:
+        return -1000000000000 - chat_id
+    return chat_id
+
+
+def is_same_telegram_chat(chat_id: Optional[int], target_chat_id: Optional[int]) -> bool:
+    """Compare Telethon and Bot API chat IDs across their different formats."""
+    if chat_id is None or target_chat_id is None:
+        return False
+    return normalize_bot_api_chat_id(chat_id) == normalize_bot_api_chat_id(target_chat_id)
+
+
+def private_message_link(chat_id: Optional[int], message_id: Optional[int]) -> Optional[str]:
+    """Build a t.me/c link only for private supergroups/channels."""
+    if chat_id is None or message_id is None:
+        return None
+
+    normalized_chat_id = normalize_bot_api_chat_id(chat_id)
+    if normalized_chat_id is None:
+        return None
+
+    chat_id_text = str(abs(normalized_chat_id))
+    if not chat_id_text.startswith("100"):
+        return None
+
+    return f"https://t.me/c/{chat_id_text[3:]}/{message_id}"
+
+
+def should_skip_message_date(
+    message_date: Optional[datetime],
+    monitor_started_at: Optional[datetime],
+    grace_seconds: int = 5,
+) -> bool:
+    """Skip messages older than monitor startup to avoid replaying backlog."""
+    if not message_date or not monitor_started_at:
+        return False
+
+    if message_date.tzinfo is None:
+        message_date = message_date.replace(tzinfo=timezone.utc)
+    if monitor_started_at.tzinfo is None:
+        monitor_started_at = monitor_started_at.replace(tzinfo=timezone.utc)
+
+    return (monitor_started_at - message_date).total_seconds() > grace_seconds
+
+
+def should_skip_bot_sender(sender) -> bool:
+    """Skip messages sent by Telegram bots."""
+    return bool(getattr(sender, "bot", False))
 
 
 # 真实设备数据库 - 基于市场份额的真实设备
@@ -246,6 +347,7 @@ class TelegramClientManager:
         self.client: Optional[TelegramClient] = None
         self.is_monitoring = False
         self.target_chat_id: Optional[int] = None
+        self._monitor_started_at: Optional[datetime] = None
         self._message_handler = None
         self._processed_messages: Dict[Tuple[int, int], float] = {}
         self._processed_messages_lock = asyncio.Lock()
@@ -650,7 +752,7 @@ class TelegramClientManager:
             logger.error(f"加载对话失败: {e}")
     
     async def get_available_chats(self) -> List[Dict]:
-        """获取可用的聊天列表（可以发送消息的）"""
+        """获取可作为转发目标的聊天列表（当前账号可管理/可发帖）。"""
         if not await self.is_logged_in():
             return []
         
@@ -661,35 +763,16 @@ class TelegramClientManager:
             
             for dialog in dialogs:
                 entity = dialog.entity
-                
-                # 检查是否可以发送消息
+
                 if isinstance(entity, Channel):
-                    if entity.broadcast:  # 频道
-                        if entity.creator or (hasattr(entity, 'admin_rights') and entity.admin_rights and entity.admin_rights.post_messages):
-                            chat_type = "频道"
-                        else:
-                            continue
-                    else:  # 超级群组
-                        # 检查是否被禁言
-                        if hasattr(entity, 'banned_rights') and entity.banned_rights and entity.banned_rights.send_messages:
-                            continue
-                        chat_type = "群组"
+                    chat_info = build_target_chat_info(entity, "channel")
                 elif isinstance(entity, Chat):
-                    # 普通群组，检查是否被踢出或限制
-                    if hasattr(entity, 'kicked') and entity.kicked:
-                        continue
-                    if hasattr(entity, 'left') and entity.left:
-                        continue
-                    chat_type = "群组"
+                    chat_info = build_target_chat_info(entity, "chat")
                 else:
-                    continue  # 跳过私聊
-                
-                available_chats.append({
-                    'id': entity.id,
-                    'title': entity.title,
-                    'type': chat_type,
-                    'username': getattr(entity, 'username', None)
-                })
+                    chat_info = None
+
+                if chat_info:
+                    available_chats.append(chat_info)
         
         except Exception as e:
             logger.error(f"获取聊天列表失败: {e}")
@@ -769,13 +852,10 @@ class TelegramClientManager:
 
             logger.info(f"✓ 目标聊天ID: {self.target_chat_id}")
 
-            # 同步所有未读消息，确保能接收到所有群组的消息
-            logger.info("正在同步消息...")
-            await self.client.catch_up()
-            logger.info("✓ 消息同步完成")
-
             async with self._processed_messages_lock:
                 self._processed_messages.clear()
+
+            self._monitor_started_at = datetime.now(timezone.utc)
 
             # 添加消息处理器
             async def message_handler(event):
@@ -804,6 +884,7 @@ class TelegramClientManager:
                 self._processed_messages.clear()
             
             self.is_monitoring = False
+            self._monitor_started_at = None
             logger.info("停止监控消息")
             return True
             
@@ -822,19 +903,32 @@ class TelegramClientManager:
             sender_id = message.sender_id if message.sender_id else "Unknown"
             has_text = bool(message.text)
 
+            if is_same_telegram_chat(message.chat_id, self.target_chat_id):
+                logger.debug(f"跳过目标群消息，避免转发自循环: chat_id={chat_id}")
+                return
+
+            if should_skip_message_date(message.date, self._monitor_started_at):
+                logger.debug(f"跳过监控启动前的历史消息: chat_id={chat_id}, message_id={message.id}")
+                return
+
             if await self._is_duplicate_message(message.chat_id, message.id):
-                logger.info(
+                logger.debug(
                     f"跳过重复消息: chat_id={message.chat_id}, message_id={message.id}, sender_id={sender_id}"
                 )
                 return
             
-            logger.info(f"📨 新消息 | 群组ID: {chat_id} | 发送者ID: {sender_id} | 有文本: {has_text}")
+            logger.debug(f"📨 新消息 | 群组ID: {chat_id} | 发送者ID: {sender_id} | 有文本: {has_text}")
+
+            sender = await message.get_sender()
+            if should_skip_bot_sender(sender):
+                logger.debug(f"跳过 Bot 消息: chat_id={chat_id}, message_id={message.id}, sender_id={sender_id}")
+                return
             
             # 检查黑名单
             from services.blacklist_service import BlacklistService
             blacklist_service = BlacklistService()
             if await blacklist_service.is_blacklisted(user_id=sender_id, chat_id=chat_id):
-                logger.info(f"🚫 跳过：用户或群组在黑名单中")
+                logger.debug(f"🚫 跳过：用户或群组在黑名单中")
                 return
             
             # 跳过空消息
@@ -906,12 +1000,9 @@ class TelegramClientManager:
         # 第一行：历史、屏蔽此人、屏蔽此群
         row1 = []
         if source_chat_id and source_chat_id < 0:
-            # 超级群组ID格式：-100xxxxxxxxxx，需要去掉-100前缀
-            chat_id_for_link = str(abs(source_chat_id))
-            if chat_id_for_link.startswith("100"):
-                chat_id_for_link = chat_id_for_link[3:]  # 去掉100前缀
-            history_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
-            row1.append(InlineKeyboardButton("👀 查看", url=history_link))
+            history_link = private_message_link(source_chat_id, message_id)
+            if history_link:
+                row1.append(InlineKeyboardButton("👀 查看", url=history_link))
         if sender_id:
             row1.append(InlineKeyboardButton("🚫 屏蔽此人", callback_data=f"block_user_{sender_id}"))
         if source_chat_id:
@@ -938,18 +1029,14 @@ class TelegramClientManager:
         async with httpx.AsyncClient() as client:
             # 需要将目标群组ID转换为Bot API格式
             # Telethon 返回的超级群组ID是正数，Bot API 需要 -100 前缀
-            target_id = self.target_chat_id
-            if target_id > 0:
-                # Telethon 格式的超级群组ID，需要转换为 Bot API 格式
-                target_id = -1000000000000 - target_id
-            # 如果已经是负数，保持不变
+            target_id = normalize_bot_api_chat_id(self.target_chat_id)
             
             logger.info(f"Bot API 目标ID: {target_id}")
             
             payload = {
                 "chat_id": target_id,
                 "text": text,
-                "parse_mode": "Markdown",
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
             
@@ -983,32 +1070,30 @@ class TelegramClientManager:
             chat_username = getattr(chat, 'username', None)
             
             # 构建用户链接
-            if sender_username:
-                user_link = f"[{sender_name}](https://t.me/{sender_username})"
-            else:
-                user_link = f"[{sender_name}](tg://user?id={sender_id})"
+            user_link = build_telegram_user_html_link(
+                sender_name,
+                username=sender_username,
+                user_id=sender_id,
+            )
             
             # 构建群组链接
             if chat_username:
-                chat_link = f"[{chat_name}](https://t.me/{chat_username})"
+                chat_link = build_telegram_html_link(chat_name, f"https://t.me/{chat_username}")
             elif chat_id < 0:
-                # 超级群组/频道
-                chat_link = f"[{chat_name}](https://t.me/c/{abs(chat_id) % 10000000000}/{message.id})"
+                source_link = private_message_link(chat_id, message.id)
+                chat_link = build_telegram_html_link(chat_name, source_link) if source_link else escape_html_text(chat_name)
             else:
-                chat_link = chat_name
+                chat_link = escape_html_text(chat_name)
             
             # 构建消息链接
             if chat_username:
                 msg_link = f"https://t.me/{chat_username}/{message.id}"
             elif chat_id < 0:
-                msg_link = f"https://t.me/c/{abs(chat_id) % 10000000000}/{message.id}"
+                msg_link = private_message_link(chat_id, message.id)
             else:
                 msg_link = None
             
-            # 应用样式
-            styled_text = message.text
-            if msg_link:
-                styled_text = f"[{message.text}]({msg_link})"
+            styled_text = escape_html_text(message.text)
             
             # 获取广告配置
             header_title = "📨 实时精准获客"
@@ -1024,9 +1109,9 @@ class TelegramClientManager:
                 logger.warning(f"获取header配置失败: {e}")
             
             # 构建标题
-            title = header_title
+            title = escape_html_text(header_title)
             if header_author:
-                title += f" {header_author}"
+                title += f" {escape_html_text(header_author)}"
             
             # 格式化消息
             formatted = f"""{title}
@@ -1034,8 +1119,9 @@ class TelegramClientManager:
 用户: {user_link}
 来源: 🔍 {chat_link}
 内容: {styled_text}
+{f"原文: {build_telegram_html_link('查看消息', msg_link)}" if msg_link else ""}
 时间: {format_datetime(message.date)}
-命中关键词: {', '.join([kw.content for kw in matched_keywords])}
+命中关键词: {escape_html_text(', '.join([kw.content for kw in matched_keywords]))}
 """
             
             # 添加消息内广告链接（使用 ads 配置）
@@ -1045,7 +1131,7 @@ class TelegramClientManager:
                 if ads:
                     formatted += "\n"
                     for ad in ads:
-                        formatted += f"🔗 [{ad['title']}]({ad['url']})\n"
+                        formatted += f"🔗 {build_telegram_html_link(ad['title'], ad['url'])}\n"
             except Exception as e:
                 logger.warning(f"获取广告链接失败: {e}")
             
