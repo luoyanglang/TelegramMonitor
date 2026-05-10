@@ -13,14 +13,21 @@ CHANGELOG = """# Changelog
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-05-10
+
+### Changed
+- Upgraded Telethon to improve high-volume update catch-up behavior.
+- Decoupled Telegram update receiving from keyword processing with a bounded worker queue.
+- Reused Bot API HTTP connections during monitoring instead of creating a client per forwarded message.
+- Cached keyword and blacklist lookups briefly to reduce SQLite load in high-traffic groups.
+
+### Fixed
+- Improved reliability when large groups produce fast message bursts.
+
 ## [2.2.0] - 2026-05-09
 
 ### Added
 - Added multiple administrator support with `AUTHORIZED_USER_IDS`.
-- Added pagination for forwarding target selection.
-
-### Changed
-- Forwarded messages now use safe HTML formatting instead of Markdown.
 
 ### Fixed
 - Fixed forwarding loops when the target group is also monitored.
@@ -35,29 +42,29 @@ CHANGELOG = """# Changelog
 
 class ReleaseBodyTests(unittest.TestCase):
     def test_extract_changelog_section_accepts_tag_version(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.1")
 
-        self.assertIn("## [2.2.0] - 2026-05-09", section)
-        self.assertIn("Fixed invalid message links", section)
+        self.assertIn("## [2.2.1] - 2026-05-10", section)
+        self.assertIn("Improved reliability when large groups", section)
         self.assertNotIn("Initial release", section)
 
     def test_extract_highlights_returns_first_four_user_facing_items(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.1")
 
         self.assertEqual(
             build_release_body.extract_highlights(section),
             [
-                "Added multiple administrator support with `AUTHORIZED_USER_IDS`.",
-                "Added pagination for forwarding target selection.",
-                "Forwarded messages now use safe HTML formatting instead of Markdown.",
-                "Fixed forwarding loops when the target group is also monitored.",
+                "Upgraded Telethon to improve high-volume update catch-up behavior.",
+                "Improved reliability when large groups produce fast message bursts.",
+                "Decoupled Telegram update receiving from keyword processing with a bounded worker queue.",
+                "Reused Bot API HTTP connections during monitoring instead of creating a client per forwarded message.",
             ],
         )
 
     def test_build_release_body_puts_highlights_before_downloads(self):
-        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.0")
+        section = build_release_body.extract_changelog_section(CHANGELOG, "v2.2.1")
         body = build_release_body.build_release_body(
-            "v2.2.0",
+            "v2.2.1",
             section,
             "luoyanglang/TelegramMonitor",
             "luoyanglangge",
@@ -65,10 +72,10 @@ class ReleaseBodyTests(unittest.TestCase):
         )
 
         self.assertIn("### Highlights", body)
-        self.assertIn("- Added multiple administrator support with `AUTHORIZED_USER_IDS`.", body)
+        self.assertIn("- Upgraded Telethon to improve high-volume update catch-up behavior.", body)
         self.assertIn("### Update Notes", body)
         self.assertIn("### Downloads", body)
-        self.assertIn("docker pull luoyanglangge/telegram-monitor:v2.2.0", body)
+        self.assertIn("docker pull luoyanglangge/telegram-monitor:v2.2.1", body)
 
 
 if __name__ == "__main__":

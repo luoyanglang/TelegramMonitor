@@ -4,6 +4,7 @@ Telegram客户端管理
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -349,6 +350,9 @@ class TelegramClientManager:
         self.target_chat_id: Optional[int] = None
         self._monitor_started_at: Optional[datetime] = None
         self._message_handler = None
+        self._message_queue: Optional[asyncio.Queue] = None
+        self._message_worker_tasks = set()
+        self._http_client = None
         self._processed_messages: Dict[Tuple[int, int], float] = {}
         self._processed_messages_lock = asyncio.Lock()
         
@@ -358,6 +362,78 @@ class TelegramClientManager:
         
         # 设备指纹管理器
         self.device_fingerprint = DeviceFingerprint(self.session_path)
+
+    def _get_monitor_queue_size(self) -> int:
+        """Return the bounded queue size for decoupling updates from processing."""
+        return max(1, config('MONITOR_QUEUE_SIZE', default=2000, cast=int))
+
+    def _get_monitor_worker_count(self) -> int:
+        """Return the number of concurrent message processing workers."""
+        return max(1, config('MONITOR_WORKER_COUNT', default=4, cast=int))
+
+    def _ensure_message_queue(self) -> asyncio.Queue:
+        if self._message_queue is None:
+            self._message_queue = asyncio.Queue(maxsize=self._get_monitor_queue_size())
+        return self._message_queue
+
+    def _start_message_workers(self, keyword_matcher) -> None:
+        self._ensure_message_queue()
+        if self._message_worker_tasks:
+            return
+
+        for worker_index in range(self._get_monitor_worker_count()):
+            task = asyncio.create_task(
+                self._message_worker(keyword_matcher),
+                name=f"telegram-monitor-worker-{worker_index + 1}",
+            )
+            self._message_worker_tasks.add(task)
+            task.add_done_callback(self._message_worker_tasks.discard)
+
+    async def _stop_message_workers(self) -> None:
+        tasks = list(self._message_worker_tasks)
+        for task in tasks:
+            task.cancel()
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        self._message_worker_tasks.clear()
+        self._message_queue = None
+
+    async def _message_worker(self, keyword_matcher) -> None:
+        queue = self._ensure_message_queue()
+        while True:
+            event = await queue.get()
+            try:
+                await self._handle_new_message(event, keyword_matcher)
+            finally:
+                queue.task_done()
+
+    async def _enqueue_message_event(self, event, keyword_matcher) -> None:
+        """Enqueue an event quickly so Telethon update dispatch is not doing heavy work."""
+        queue = self._ensure_message_queue()
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.warning(
+                "消息处理队列已满，等待 worker 释放空位: size=%s",
+                queue.qsize(),
+            )
+            await queue.put(event)
+
+    async def _get_http_client(self):
+        """Reuse one HTTP client during monitoring to avoid per-message connection setup."""
+        if self._http_client is None or self._http_client.is_closed:
+            import httpx
+
+            self._http_client = httpx.AsyncClient(timeout=30.0)
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        if self._http_client is not None:
+            with contextlib.suppress(Exception):
+                await self._http_client.aclose()
+            self._http_client = None
 
     def _mask_proxy_secret(self, secret: Optional[str]) -> str:
         """隐藏代理敏感信息，避免在状态页泄露密码或密钥。"""
@@ -603,6 +679,7 @@ class TelegramClientManager:
             app_version=fingerprint.get('app_version', '10.0.0'),
             lang_code=fingerprint.get('lang_code', 'en'),
             system_lang_code=fingerprint.get('system_lang_code', 'en-US'),
+            catch_up=True,
             **proxy_settings,
         )
         
@@ -857,14 +934,21 @@ class TelegramClientManager:
 
             self._monitor_started_at = datetime.now(timezone.utc)
 
-            # 添加消息处理器
+            self._ensure_message_queue()
+            self._start_message_workers(keyword_matcher)
+
+            # 添加消息处理器。这里仅入队，避免大群高频消息被重处理链路拖慢。
             async def message_handler(event):
-                await self._handle_new_message(event, keyword_matcher)
+                await self._enqueue_message_event(event, keyword_matcher)
 
             self.client.add_event_handler(message_handler, events.NewMessage)
             self._message_handler = message_handler
 
             self.is_monitoring = True
+            try:
+                await self.client.catch_up()
+            except Exception as e:
+                logger.warning(f"监听启动后 catch-up 失败，将继续实时监听: {e}")
             logger.info("✓ 消息处理器已注册，开始监控所有群组消息")
             logger.info("=== 监控启动成功 ===")
             return True
@@ -882,6 +966,9 @@ class TelegramClientManager:
 
             async with self._processed_messages_lock:
                 self._processed_messages.clear()
+
+            await self._stop_message_workers()
+            await self._close_http_client()
             
             self.is_monitoring = False
             self._monitor_started_at = None
@@ -989,7 +1076,6 @@ class TelegramClientManager:
     
     async def _send_via_bot(self, text: str, sender_id: int, source_chat_id: int, message_id: int):
         """通过 Bot API 发送消息"""
-        import httpx
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
         bot_token = config('BOT_TOKEN')
@@ -1026,33 +1112,32 @@ class TelegramClientManager:
         reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
         
         # 调用 Bot API 发送消息
-        async with httpx.AsyncClient() as client:
-            # 需要将目标群组ID转换为Bot API格式
-            # Telethon 返回的超级群组ID是正数，Bot API 需要 -100 前缀
-            target_id = normalize_bot_api_chat_id(self.target_chat_id)
-            
-            logger.info(f"Bot API 目标ID: {target_id}")
-            
-            payload = {
-                "chat_id": target_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-            
-            if reply_markup:
-                payload["reply_markup"] = reply_markup.to_json()
-            
-            response = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json=payload,
-                timeout=30.0
-            )
-            
-            if response.status_code != 200:
-                result = response.json()
-                logger.error(f"Bot API 发送失败: {result}")
-                raise Exception(f"Bot API error: {result.get('description', 'Unknown error')}")
+        client = await self._get_http_client()
+        # 需要将目标群组ID转换为Bot API格式
+        # Telethon 返回的超级群组ID是正数，Bot API 需要 -100 前缀
+        target_id = normalize_bot_api_chat_id(self.target_chat_id)
+
+        logger.info(f"Bot API 目标ID: {target_id}")
+
+        payload = {
+            "chat_id": target_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+
+        if reply_markup:
+            payload["reply_markup"] = reply_markup.to_json()
+
+        response = await client.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json=payload,
+        )
+
+        if response.status_code != 200:
+            result = response.json()
+            logger.error(f"Bot API 发送失败: {result}")
+            raise Exception(f"Bot API error: {result.get('description', 'Unknown error')}")
     
     async def _format_message(self, message, matched_keywords) -> str:
         """格式化消息"""

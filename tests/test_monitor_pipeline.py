@@ -1,0 +1,74 @@
+import os
+import unittest
+from types import SimpleNamespace
+
+
+os.environ.setdefault("BOT_TOKEN", "123456:TEST_TOKEN")
+os.environ.setdefault("TELEGRAM_API_ID", "123456")
+os.environ.setdefault("TELEGRAM_API_HASH", "0" * 32)
+os.environ.setdefault("AUTHORIZED_USER_ID", "123456789")
+
+from core.telegram_client import TelegramClientManager
+
+
+class FakeClient:
+    def __init__(self):
+        self.handlers = []
+        self.catch_up_calls = 0
+
+    def add_event_handler(self, handler, event_builder):
+        self.handlers.append((handler, event_builder))
+
+    def remove_event_handler(self, handler, event_builder):
+        self.handlers = [
+            item for item in self.handlers
+            if item[0] is not handler
+        ]
+
+    async def catch_up(self):
+        self.catch_up_calls += 1
+
+
+class MonitorPipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        if hasattr(self, "manager"):
+            await self.manager.stop_monitoring()
+
+    async def test_start_monitoring_catches_up_after_registering_handler(self):
+        self.manager = TelegramClientManager()
+        self.manager.client = FakeClient()
+        self.manager.target_chat_id = 12345
+        self.manager.is_logged_in = _async_return(True)
+
+        self.assertTrue(await self.manager.start_monitoring(SimpleNamespace()))
+
+        self.assertEqual(len(self.manager.client.handlers), 1)
+        self.assertEqual(self.manager.client.catch_up_calls, 1)
+
+    async def test_event_callback_enqueues_without_processing_inline(self):
+        self.manager = TelegramClientManager()
+        self.manager._message_queue = None
+        processed = []
+
+        async def fake_handle(event, keyword_matcher):
+            processed.append((event, keyword_matcher))
+
+        self.manager._handle_new_message = fake_handle
+        event = SimpleNamespace(message=SimpleNamespace(id=1))
+        keyword_matcher = SimpleNamespace()
+
+        await self.manager._enqueue_message_event(event, keyword_matcher)
+
+        self.assertEqual(processed, [])
+        self.assertEqual(self.manager._message_queue.qsize(), 1)
+
+
+def _async_return(value):
+    async def inner(*args, **kwargs):
+        return value
+
+    return inner
+
+
+if __name__ == "__main__":
+    unittest.main()

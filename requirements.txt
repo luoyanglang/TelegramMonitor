@@ -2,7 +2,7 @@
 python-telegram-bot==20.7
 
 # Telegram客户端
-telethon==1.32.1
+telethon==1.43.2
 
 # 数据库
 sqlalchemy==2.0.23

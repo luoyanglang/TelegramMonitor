@@ -1,6 +1,10 @@
 .env
 .git
 .github
+!.github/
+.github/*
+!.github/scripts/
+!.github/scripts/*.py
 .venv
 __pycache__
 *.pyc

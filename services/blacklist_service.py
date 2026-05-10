@@ -4,6 +4,8 @@
 """
 
 import logging
+import asyncio
+from time import monotonic
 from typing import List, Optional, Dict, Tuple
 
 from sqlalchemy import select, func, delete
@@ -16,12 +18,46 @@ logger = logging.getLogger(__name__)
 
 class BlacklistService:
     """黑名单服务类"""
+    _blacklist_cache: Optional[Tuple[set, set]] = None
+    _blacklist_cache_loaded_at: float = 0.0
+    _blacklist_cache_lock = asyncio.Lock()
+    _blacklist_cache_ttl_seconds = 5.0
     
     # 类型映射
     TYPE_NAMES = {
         0: "用户",
         1: "群组"
     }
+
+    def invalidate_cache(self):
+        """Invalidate the shared blacklist cache after configuration changes."""
+        type(self)._blacklist_cache = None
+        type(self)._blacklist_cache_loaded_at = 0.0
+
+    async def _get_cached_blacklist(self) -> Tuple[set, set]:
+        now = monotonic()
+        cls = type(self)
+        if cls._blacklist_cache is not None and now - cls._blacklist_cache_loaded_at <= cls._blacklist_cache_ttl_seconds:
+            return cls._blacklist_cache
+
+        async with cls._blacklist_cache_lock:
+            now = monotonic()
+            if cls._blacklist_cache is not None and now - cls._blacklist_cache_loaded_at <= cls._blacklist_cache_ttl_seconds:
+                return cls._blacklist_cache
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Blacklist))
+                user_ids = set()
+                chat_ids = set()
+                for item in result.scalars().all():
+                    if item.target_type == 0:
+                        user_ids.add(item.target_id)
+                    elif item.target_type == 1:
+                        chat_ids.add(item.target_id)
+
+                cls._blacklist_cache = (user_ids, chat_ids)
+                cls._blacklist_cache_loaded_at = monotonic()
+                return cls._blacklist_cache
     
     async def add_to_blacklist(self, target_id: str, target_type: int = 0, name: str = None) -> Tuple[bool, str]:
         """添加到黑名单"""
@@ -49,6 +85,8 @@ class BlacklistService:
                 )
                 session.add(blacklist_item)
                 await session.commit()
+
+            self.invalidate_cache()
                 
             type_name = self.TYPE_NAMES.get(target_type, "未知")
             return True, f"已将{type_name} {target_id} 添加到黑名单"
@@ -67,6 +105,8 @@ class BlacklistService:
                 
                 await session.delete(item)
                 await session.commit()
+
+            self.invalidate_cache()
                 
             return True, "已从黑名单移除"
             
@@ -125,28 +165,12 @@ class BlacklistService:
     async def is_blacklisted(self, user_id: int = None, chat_id: int = None) -> bool:
         """检查是否在黑名单中"""
         try:
-            async with AsyncSessionLocal() as session:
-                # 检查用户黑名单
-                if user_id:
-                    query = select(Blacklist).where(
-                        Blacklist.target_id == str(user_id),
-                        Blacklist.target_type == 0
-                    )
-                    result = await session.execute(query)
-                    if result.scalar_one_or_none():
-                        return True
-                
-                # 检查群组黑名单
-                if chat_id:
-                    query = select(Blacklist).where(
-                        Blacklist.target_id == str(chat_id),
-                        Blacklist.target_type == 1
-                    )
-                    result = await session.execute(query)
-                    if result.scalar_one_or_none():
-                        return True
-                
-                return False
+            user_ids, chat_ids = await self._get_cached_blacklist()
+            if user_id and str(user_id) in user_ids:
+                return True
+            if chat_id and str(chat_id) in chat_ids:
+                return True
+            return False
                 
         except Exception as e:
             logger.error(f"检查黑名单失败: {e}")

@@ -6,6 +6,8 @@
 import json
 import re
 import logging
+import asyncio
+from time import monotonic
 from typing import List, Optional, Dict, Any, Tuple
 
 from sqlalchemy import select, func, delete
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 class KeywordService:
     """关键词服务类"""
+    _keyword_cache: Optional[List[Keyword]] = None
+    _keyword_cache_loaded_at: float = 0.0
+    _keyword_cache_lock = asyncio.Lock()
+    _keyword_cache_ttl_seconds = 5.0
     
     # 关键词类型映射
     TYPE_NAMES = {
@@ -33,6 +39,28 @@ class KeywordService:
         0: "排除",
         1: "监控"
     }
+
+    def invalidate_cache(self):
+        """Invalidate the shared keyword cache after configuration changes."""
+        type(self)._keyword_cache = None
+        type(self)._keyword_cache_loaded_at = 0.0
+
+    async def _get_cached_keywords(self) -> List[Keyword]:
+        now = monotonic()
+        cls = type(self)
+        if cls._keyword_cache is not None and now - cls._keyword_cache_loaded_at <= cls._keyword_cache_ttl_seconds:
+            return cls._keyword_cache
+
+        async with cls._keyword_cache_lock:
+            now = monotonic()
+            if cls._keyword_cache is not None and now - cls._keyword_cache_loaded_at <= cls._keyword_cache_ttl_seconds:
+                return cls._keyword_cache
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Keyword))
+                cls._keyword_cache = list(result.scalars().all())
+                cls._keyword_cache_loaded_at = monotonic()
+                return cls._keyword_cache
     
     async def add_keyword(self, content: str, kw_type: int = 1, action: int = 1, 
                          styles: Dict[str, bool] = None) -> Tuple[bool, str]:
@@ -78,6 +106,8 @@ class KeywordService:
             async with AsyncSessionLocal() as session:
                 session.add(keyword)
                 await session.commit()
+
+            self.invalidate_cache()
             
             return True, "关键词添加成功"
             
@@ -223,6 +253,7 @@ class KeywordService:
                     keyword.is_spoiler = styles.get('spoiler', keyword.is_spoiler)
                 
                 await session.commit()
+                self.invalidate_cache()
                 return True, "关键词更新成功"
                 
         except Exception as e:
@@ -240,6 +271,8 @@ class KeywordService:
                 
                 await session.delete(keyword)
                 await session.commit()
+
+                self.invalidate_cache()
                 
                 return True, "关键词删除成功"
                 
@@ -280,6 +313,8 @@ class KeywordService:
             async with AsyncSessionLocal() as session:
                 session.add_all(keywords)
                 await session.commit()
+
+            self.invalidate_cache()
             
             return True, f"成功添加 {len(keywords)} 个关键词"
             
@@ -300,10 +335,7 @@ class KeywordService:
                           chat_id: int) -> List[Keyword]:
         """匹配消息中的关键词"""
         try:
-            # 获取所有关键词
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(select(Keyword))
-                all_keywords = result.scalars().all()
+            all_keywords = await self._get_cached_keywords()
             
             matched_keywords = []
             

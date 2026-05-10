@@ -4,6 +4,19 @@ All notable changes to Telegram Monitor will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-05-10
+
+### Changed
+
+- Upgraded Telethon to improve high-volume update catch-up behavior.
+- Decoupled Telegram update receiving from keyword processing with a bounded worker queue.
+- Reused Bot API HTTP connections during monitoring instead of creating a client per forwarded message.
+- Cached keyword and blacklist lookups briefly to reduce SQLite load in high-traffic groups.
+
+### Fixed
+
+- Improved reliability when large groups produce fast message bursts.
+
 ## [2.2.0] - 2026-05-09
 
 ### Added
