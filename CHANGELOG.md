@@ -4,6 +4,10 @@ All notable changes to Telegram Monitor will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Telegram release announcements not appearing in linked discussion groups by adding an opt-in discussion mirror.
+
 ## [2.2.2] - 2026-05-13
 
 ### Added

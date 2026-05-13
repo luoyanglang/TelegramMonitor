@@ -12,6 +12,7 @@ SECTION_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*)$")
 LIST_RE = re.compile(r"^\s*[-*]\s+(.*)$")
 LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 BACKTICK_RE = re.compile(r"`([^`]+)`")
+TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 
 
 def github_request(method, path, token, payload=None):
@@ -37,6 +38,10 @@ def telegram_request(method, token, payload):
     request = urllib.request.Request(url, data=data, method="POST")
     with urllib.request.urlopen(request) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def env_truthy(name):
+    return os.environ.get(name, "").strip().lower() in TRUE_VALUES
 
 
 def strip_comments(text):
@@ -155,6 +160,36 @@ def sync_release_body(repo, release_id, body, message_id, token):
     )
 
 
+def resolve_discussion_group_id(token, channel_id):
+    configured_group_id = os.environ.get("TELEGRAM_DISCUSSION_GROUP_ID", "").strip()
+    if configured_group_id:
+        return configured_group_id
+
+    chat = telegram_request("getChat", token, {"chat_id": channel_id}).get("result") or {}
+    linked_chat_id = chat.get("linked_chat_id")
+    if linked_chat_id is None:
+        return None
+    return str(linked_chat_id)
+
+
+def mirror_to_discussion_group(token, channel_id, message_id):
+    discussion_group_id = resolve_discussion_group_id(token, channel_id)
+    if not discussion_group_id:
+        return {"enabled": True, "mirrored": False, "reason": "no_linked_discussion_group"}
+
+    telegram_request(
+        "forwardMessage",
+        token,
+        {
+            "chat_id": discussion_group_id,
+            "from_chat_id": channel_id,
+            "message_id": message_id,
+            "disable_notification": "true",
+        },
+    )
+    return {"enabled": True, "mirrored": True}
+
+
 def main():
     repo = os.environ["REPO"]
     release_id = os.environ.get("RELEASE_ID")
@@ -196,6 +231,7 @@ def main():
     }
 
     result = None
+    sent_new_message = False
     if existing_message_id:
         try:
             result = telegram_request(
@@ -209,6 +245,15 @@ def main():
     if not existing_message_id:
         result = telegram_request("sendMessage", telegram_token, payload)
         existing_message_id = str(result["result"]["message_id"])
+        sent_new_message = True
+
+    discussion_sync = {"enabled": False, "mirrored": False}
+    if sent_new_message and env_truthy("TELEGRAM_MIRROR_DISCUSSION"):
+        discussion_sync = mirror_to_discussion_group(
+            telegram_token,
+            channel_id,
+            existing_message_id,
+        )
 
     sync_release_body(repo, release_id, body, existing_message_id, github_token)
     print(
@@ -217,6 +262,7 @@ def main():
                 "release_id": release_id,
                 "tag": release["tag_name"],
                 "message_id": existing_message_id,
+                "discussion_sync": discussion_sync,
                 "ok": result["ok"],
             },
             ensure_ascii=False,

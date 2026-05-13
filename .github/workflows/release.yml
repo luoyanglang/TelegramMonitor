@@ -252,6 +252,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_DISCUSSION_GROUP_ID: ${{ secrets.TELEGRAM_DISCUSSION_GROUP_ID }}
+          TELEGRAM_MIRROR_DISCUSSION: ${{ vars.TELEGRAM_MIRROR_DISCUSSION }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKER_IMAGE_NAME: ${{ secrets.DOCKER_IMAGE_NAME }}
           REPO: ${{ github.repository }}
