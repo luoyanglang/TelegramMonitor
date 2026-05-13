@@ -9,8 +9,10 @@ os.environ.setdefault("TELEGRAM_API_HASH", "0" * 32)
 os.environ.setdefault("AUTHORIZED_USER_ID", "123456789")
 
 from core.telegram_client import (
+    bot_api_chat_id_candidates,
     build_target_chat_info,
     is_same_telegram_chat,
+    normalize_bot_api_chat_id,
     private_message_link,
     should_skip_bot_sender,
     should_skip_message_date,
@@ -32,7 +34,7 @@ class TargetChatTests(unittest.TestCase):
 
         self.assertEqual(
             build_target_chat_info(entity, "channel"),
-            {"id": 1001, "title": "News", "type": "频道", "username": "news"},
+            {"id": -1000000001001, "title": "News", "type": "频道", "username": "news"},
         )
 
     def test_channel_without_post_permission_is_hidden(self):
@@ -60,7 +62,33 @@ class TargetChatTests(unittest.TestCase):
 
         self.assertEqual(
             build_target_chat_info(entity, "channel"),
-            {"id": 2002, "title": "Group", "type": "群组", "username": None},
+            {"id": -1000000002002, "title": "Group", "type": "群组", "username": None},
+        )
+
+    def test_basic_group_target_uses_plain_negative_bot_api_id(self):
+        entity = SimpleNamespace(
+            id=5141992571,
+            title="Basic Group",
+            creator=True,
+            kicked=False,
+            left=False,
+        )
+
+        self.assertEqual(
+            build_target_chat_info(entity, "chat"),
+            {"id": -5141992571, "title": "Basic Group", "type": "群组", "username": None},
+        )
+
+    def test_positive_chat_target_can_be_normalized_as_basic_group(self):
+        self.assertEqual(
+            normalize_bot_api_chat_id(5141992571, entity_kind="chat"),
+            -5141992571,
+        )
+
+    def test_positive_legacy_target_has_supergroup_and_basic_group_candidates(self):
+        self.assertEqual(
+            bot_api_chat_id_candidates(5141992571),
+            [-1005141992571, -5141992571],
         )
 
     def test_group_without_admin_rights_is_hidden(self):

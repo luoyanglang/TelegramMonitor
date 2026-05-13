@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 
@@ -27,6 +28,27 @@ class FakeClient:
 
     async def catch_up(self):
         self.catch_up_calls += 1
+
+
+class FakeMessage:
+    id = 88
+    sender_id = 123456
+    chat_id = -1002780532153
+    text = "北京"
+    date = datetime(2026, 5, 13, 6, 0, tzinfo=timezone.utc)
+
+    async def get_sender(self):
+        return SimpleNamespace(first_name="狼哥", username=None)
+
+    async def get_chat(self):
+        return SimpleNamespace(title="Source Group", username=None)
+
+
+class FakeEntityClient:
+    async def get_entity(self, entity_id):
+        if entity_id == 123456:
+            return SimpleNamespace(first_name="狼哥", username="luoyanglang")
+        raise ValueError("unknown entity")
 
 
 class MonitorPipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -61,6 +83,15 @@ class MonitorPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(processed, [])
         self.assertEqual(self.manager._message_queue.qsize(), 1)
+
+    async def test_format_message_resolves_full_sender_entity_for_username_link(self):
+        self.manager = TelegramClientManager()
+        self.manager.client = FakeEntityClient()
+        keyword = SimpleNamespace(content="北京")
+
+        formatted = await self.manager._format_message(FakeMessage(), [keyword])
+
+        self.assertIn('<a href="https://t.me/luoyanglang">狼哥</a>', formatted)
 
 
 def _async_return(value):

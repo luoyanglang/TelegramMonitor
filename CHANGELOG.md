@@ -4,6 +4,26 @@ All notable changes to Telegram Monitor will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-05-13
+
+### Added
+
+- Added an inline numeric keypad for Telegram account login verification codes.
+- Added regression coverage for login code handling, target chat ID normalization, and sender link enrichment.
+
+### Changed
+
+- Telegram login verification now uses button-based code entry to avoid invalidating codes by sending them as plain Telegram messages.
+- Forwarding target selection now stores Bot API-compatible chat IDs for channels, supergroups, and basic groups.
+- Telegram release announcements now use a shorter highlights-and-release format.
+
+### Fixed
+
+- Fixed Telegram login failures where plain numeric verification codes were immediately reported as expired.
+- Fixed forwarding to basic groups when the stored target ID was incorrectly converted to a `-100...` supergroup ID.
+- Fixed legacy positive target IDs by retrying with the basic group Bot API ID when the supergroup ID returns `chat not found`.
+- Fixed forwarded sender display by resolving full sender entities when compact message updates do not include usernames.
+
 ## [2.2.1] - 2026-05-10
 
 ### Changed

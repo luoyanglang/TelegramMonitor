@@ -17,6 +17,12 @@ from telegram.ext import (
 )
 
 from bot.keyboards import *
+from core.login_code import (
+    decode_login_state,
+    encode_login_state,
+    is_plain_login_code_message,
+    normalize_login_code,
+)
 from core.auth import load_authorized_user_ids
 from core.database import get_user_state, set_user_state
 from core.utils import mask_sensitive_id, paginate_items
@@ -174,6 +180,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 代理设置
     elif data.startswith("proxy_"):
         await handle_proxy_setting(update, context, data)
+    elif data.startswith("code_digit_") or data in {"code_delete", "code_submit"}:
+        await handle_verification_keypad(update, context, data)
     
     # 关键词管理
     elif data == "keyword_menu":
@@ -526,15 +534,13 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
     else:
         # 需要验证码
         if "验证码" in message:
-            text = f"""
-📱 **验证码验证**
-
-{message}
-
-请输入收到的验证码:
-"""
-            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
-            await set_user_state(user_id, "waiting_verification", phone)
+            await safe_edit_message(
+                update,
+                context,
+                build_verification_prompt(message),
+                verification_code_keyboard(),
+            )
+            await set_user_state(user_id, "waiting_verification", encode_login_state(phone))
         else:
             # 登录失败
             text = f"""
@@ -552,17 +558,98 @@ async def handle_verification_input(update: Update, context: ContextTypes.DEFAUL
     """处理验证码输入"""
     user_id = update.effective_user.id
     user_state = await get_user_state(user_id)
-    phone = user_state.temp_data
+    phone, _ = decode_login_state(user_state.temp_data)
     
     if not phone:
         await show_account_menu(update, context)
         return
+
+    if is_plain_login_code_message(code):
+        await safe_edit_message(
+            update,
+            context,
+            build_verification_prompt("请使用下方数字键盘输入验证码。"),
+            verification_code_keyboard(),
+        )
+        await set_user_state(user_id, "waiting_verification", encode_login_state(phone))
+        return
     
     # 验证验证码
-    success, message = await telegram_service.verify_code(phone, code)
+    success, message = await telegram_service.verify_code(phone, normalize_login_code(code))
+    await handle_verification_result(update, context, user_id, phone, success, message)
+
+
+async def handle_verification_keypad(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    """处理验证码内联键盘输入"""
+    user_id = update.effective_user.id
+    user_state = await get_user_state(user_id)
+    phone, code = decode_login_state(user_state.temp_data)
+
+    if user_state.current_state != "waiting_verification" or not phone:
+        await show_account_menu(update, context)
+        return
+
+    if data.startswith("code_digit_"):
+        if len(code) < 8:
+            code += data.rsplit("_", 1)[-1]
+        await set_user_state(user_id, "waiting_verification", encode_login_state(phone, code))
+        await safe_edit_message(
+            update,
+            context,
+            build_verification_prompt("请继续输入验证码。", code),
+            verification_code_keyboard(),
+        )
+        return
+
+    if data == "code_delete":
+        code = code[:-1]
+        await set_user_state(user_id, "waiting_verification", encode_login_state(phone, code))
+        await safe_edit_message(
+            update,
+            context,
+            build_verification_prompt("请继续输入验证码。", code),
+            verification_code_keyboard(),
+        )
+        return
+
+    if data == "code_submit":
+        if not code:
+            await safe_edit_message(
+                update,
+                context,
+                build_verification_prompt("请先使用数字键盘输入验证码。", code),
+                verification_code_keyboard(),
+            )
+            return
+
+        success, message = await telegram_service.verify_code(phone, code)
+        await handle_verification_result(update, context, user_id, phone, success, message)
+
+
+def build_verification_prompt(message: str, code: str = "") -> str:
+    """构建验证码输入提示，不回显完整验证码。"""
+    code_status = "未输入" if not code else "•" * len(code)
+    return f"""
+📱 **验证码验证**
+
+{message}
+
+请使用下方数字键盘输入验证码，然后点击 ✅ 确认。
+当前输入: {code_status}
+"""
+
+
+async def handle_verification_result(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    phone: str,
+    success: bool,
+    message: str,
+):
+    """处理验证码提交结果"""
     
     if success:
-        # 验证成功
         text = f"""
 ✅ **验证成功**
 
@@ -572,39 +659,53 @@ async def handle_verification_input(update: Update, context: ContextTypes.DEFAUL
 """
         await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
         await set_user_state(user_id, "idle")
-    else:
-        if "邮箱" in message:
-            # 需要邮箱验证
-            text = f"""
+        return
+
+    if "邮箱" in message:
+        text = f"""
 📧 **邮箱验证**
 
 {message}
 
 请输入收到的邮箱验证码:
 """
-            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
-            await set_user_state(user_id, "waiting_email_code", phone)
-        elif "密码" in message:
-            # 需要两步验证密码
-            text = f"""
+        await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+        await set_user_state(user_id, "waiting_email_code", phone)
+        return
+
+    if "密码" in message:
+        text = f"""
 🔐 **两步验证**
 
 {message}
 
 请输入您的两步验证密码:
 """
-            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
-            await set_user_state(user_id, "waiting_password", phone)
-        else:
-            # 验证失败
-            text = f"""
+        await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+        await set_user_state(user_id, "waiting_password", phone)
+        return
+
+    if "失效" in message:
+        text = f"""
 ❌ **验证失败**
 
 {message}
 
-请重新输入验证码:
+请返回账号管理重新获取验证码。
 """
-            await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+        await safe_edit_message(update, context, text, back_cancel_menu("account_menu"))
+        await set_user_state(user_id, "idle")
+        return
+
+    text = f"""
+❌ **验证失败**
+
+{message}
+
+请使用下方数字键盘重新输入。
+"""
+    await safe_edit_message(update, context, text, verification_code_keyboard())
+    await set_user_state(user_id, "waiting_verification", encode_login_state(phone))
 
 
 async def handle_email_code_input(update: Update, context: ContextTypes.DEFAULT_TYPE, email_code: str):

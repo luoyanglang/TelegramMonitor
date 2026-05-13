@@ -124,28 +124,20 @@ def extract_highlights(body):
 
 
 def build_message(release):
-    repo = os.environ["REPO"]
     tag = release["tag_name"]
     release_url = release["html_url"]
-    repo_url = f"https://github.com/{repo}"
-    docker_ref = f"{os.environ['DOCKERHUB_USERNAME']}/{os.environ['DOCKER_IMAGE_NAME']}:{tag}"
 
     highlights = extract_highlights(release.get("body") or "")
     if highlights:
-        highlight_block = "\n".join(f"• {html.escape(item)}" for item in highlights)
+        highlight_block = "\n".join(f"- {html.escape(item)}" for item in highlights)
     else:
         highlight_block = "• Details are available on the GitHub Release page."
 
     return (
-        f"<b>Telegram Monitor released a new version</b>\n\n"
-        f"<b>Version:</b> <code>{html.escape(tag)}</code>\n\n"
+        f"<b>Telegram Monitor {html.escape(tag)}</b>\n\n"
         f"<b>Highlights:</b>\n{highlight_block}\n\n"
-        f"<b>Docker:</b>\n"
-        f"<code>{html.escape('docker pull ' + docker_ref)}</code>\n\n"
         f"<b>Release:</b>\n"
-        f"<a href=\"{html.escape(release_url, quote=True)}\">Open Release Page</a>\n\n"
-        f"<b>Repository:</b>\n"
-        f"<a href=\"{html.escape(repo_url, quote=True)}\">GitHub Repository</a>"
+        f"<a href=\"{html.escape(release_url, quote=True)}\">GitHub Release</a>"
     )
 
 

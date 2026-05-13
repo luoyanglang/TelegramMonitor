@@ -211,6 +211,37 @@ def pagination_menu(page: int, total_pages: int, prefix: str, back_data: str = "
     return InlineKeyboardMarkup(keyboard)
 
 
+def verification_code_keyboard() -> InlineKeyboardMarkup:
+    """Telegram login code keypad."""
+    keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="code_digit_1"),
+            InlineKeyboardButton("2", callback_data="code_digit_2"),
+            InlineKeyboardButton("3", callback_data="code_digit_3"),
+        ],
+        [
+            InlineKeyboardButton("4", callback_data="code_digit_4"),
+            InlineKeyboardButton("5", callback_data="code_digit_5"),
+            InlineKeyboardButton("6", callback_data="code_digit_6"),
+        ],
+        [
+            InlineKeyboardButton("7", callback_data="code_digit_7"),
+            InlineKeyboardButton("8", callback_data="code_digit_8"),
+            InlineKeyboardButton("9", callback_data="code_digit_9"),
+        ],
+        [
+            InlineKeyboardButton("⌫", callback_data="code_delete"),
+            InlineKeyboardButton("0", callback_data="code_digit_0"),
+            InlineKeyboardButton("✅", callback_data="code_submit"),
+        ],
+        [
+            InlineKeyboardButton("🔙 返回", callback_data="account_menu"),
+            InlineKeyboardButton("❌ 取消", callback_data="main_menu"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 
 def blacklist_menu() -> InlineKeyboardMarkup:
     """黑名单管理菜单"""

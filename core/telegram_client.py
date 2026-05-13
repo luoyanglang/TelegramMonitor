@@ -19,7 +19,13 @@ from urllib.parse import parse_qs, urlparse
 
 from decouple import config
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PasswordHashInvalidError, EmailUnconfirmedError
+from telethon.errors import (
+    EmailUnconfirmedError,
+    PasswordHashInvalidError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    SessionPasswordNeededError,
+)
 from telethon.network.connection import (
     ConnectionTcpMTProxyIntermediate,
     ConnectionTcpMTProxyRandomizedIntermediate,
@@ -27,6 +33,7 @@ from telethon.network.connection import (
 from telethon.tl.types import User, Chat, Channel, Dialog
 
 from core.database import get_config, set_config
+from core.login_code import normalize_login_code
 from core.utils import (
     build_telegram_html_link,
     build_telegram_user_html_link,
@@ -70,21 +77,40 @@ def build_target_chat_info(entity, entity_kind: str) -> Optional[Dict]:
         return None
 
     return {
-        'id': entity.id,
+        'id': normalize_bot_api_chat_id(entity.id, entity_kind=entity_kind),
         'title': entity.title,
         'type': chat_type,
         'username': getattr(entity, 'username', None),
     }
 
 
-def normalize_bot_api_chat_id(chat_id: Optional[int]) -> Optional[int]:
-    """Normalize Telethon positive channel IDs to Bot API supergroup IDs."""
+def normalize_bot_api_chat_id(chat_id: Optional[int], entity_kind: Optional[str] = None) -> Optional[int]:
+    """Normalize Telethon positive IDs to Bot API chat IDs."""
     if chat_id is None:
         return None
     chat_id = int(chat_id)
     if chat_id > 0:
+        if entity_kind == "chat":
+            return -chat_id
         return -1000000000000 - chat_id
     return chat_id
+
+
+def bot_api_chat_id_candidates(chat_id: Optional[int]) -> List[int]:
+    """Return Bot API target ID candidates for old positive target configs."""
+    if chat_id is None:
+        return []
+
+    chat_id = int(chat_id)
+    primary = normalize_bot_api_chat_id(chat_id)
+    candidates = [primary]
+
+    if chat_id > 0:
+        basic_group_id = -chat_id
+        if basic_group_id not in candidates:
+            candidates.append(basic_group_id)
+
+    return [candidate for candidate in candidates if candidate is not None]
 
 
 def is_same_telegram_chat(chat_id: Optional[int], target_chat_id: Optional[int]) -> bool:
@@ -716,6 +742,10 @@ class TelegramClientManager:
         返回: (是否需要密码, 消息)
         """
         try:
+            code = normalize_login_code(code)
+            if not code:
+                return False, "验证码格式错误，请输入数字验证码"
+
             if not self.client:
                 await self.create_client(phone)
                 await self.client.connect()
@@ -732,6 +762,8 @@ class TelegramClientManager:
             return False, "需要输入邮箱验证码"
         except SessionPasswordNeededError:
             return False, "需要输入两步验证密码"
+        except PhoneCodeExpiredError:
+            return False, "验证码已失效，请重新获取验证码"
         except PhoneCodeInvalidError:
             return False, "验证码无效，请重新输入"
         except Exception as e:
@@ -1111,33 +1143,41 @@ class TelegramClientManager:
         
         reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
         
-        # 调用 Bot API 发送消息
         client = await self._get_http_client()
-        # 需要将目标群组ID转换为Bot API格式
-        # Telethon 返回的超级群组ID是正数，Bot API 需要 -100 前缀
-        target_id = normalize_bot_api_chat_id(self.target_chat_id)
+        last_error = "Unknown error"
 
-        logger.info(f"Bot API 目标ID: {target_id}")
+        for target_id in bot_api_chat_id_candidates(self.target_chat_id):
+            logger.info(f"Bot API 目标ID: {target_id}")
 
-        payload = {
-            "chat_id": target_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
+            payload = {
+                "chat_id": target_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
 
-        if reply_markup:
-            payload["reply_markup"] = reply_markup.to_json()
+            if reply_markup:
+                payload["reply_markup"] = reply_markup.to_json()
 
-        response = await client.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json=payload,
-        )
+            response = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json=payload,
+            )
 
-        if response.status_code != 200:
+            if response.status_code == 200:
+                if target_id != self.target_chat_id:
+                    self.target_chat_id = target_id
+                    await set_config("target_chat_id", str(target_id))
+                return
+
             result = response.json()
+            last_error = result.get("description", "Unknown error")
             logger.error(f"Bot API 发送失败: {result}")
-            raise Exception(f"Bot API error: {result.get('description', 'Unknown error')}")
+
+            if "chat not found" not in last_error.lower():
+                break
+
+        raise Exception(f"Bot API error: {last_error}")
     
     async def _format_message(self, message, matched_keywords) -> str:
         """格式化消息"""
@@ -1147,6 +1187,22 @@ class TelegramClientManager:
             sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', 'Unknown')
             sender_username = getattr(sender, 'username', None)
             sender_id = message.sender_id
+
+            if sender_id and not sender_username and self.client:
+                try:
+                    full_sender = await self.client.get_entity(sender_id)
+                    sender_name = (
+                        getattr(full_sender, 'first_name', '')
+                        or getattr(full_sender, 'title', '')
+                        or sender_name
+                    )
+                    sender_username = getattr(full_sender, 'username', None) or sender_username
+                except Exception as e:
+                    logger.debug(
+                        "无法补全发送者信息: sender_id=%s, error=%s",
+                        mask_sensitive_id(sender_id),
+                        e,
+                    )
             
             # 获取聊天信息
             chat = await message.get_chat()
