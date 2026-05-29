@@ -44,11 +44,38 @@ class FakeMessage:
         return SimpleNamespace(title="Source Group", username=None)
 
 
+class FakeMessageWithUsername(FakeMessage):
+    async def get_sender(self):
+        return SimpleNamespace(first_name="狼哥", username="luoyanglang")
+
+
 class FakeEntityClient:
     async def get_entity(self, entity_id):
         if entity_id == 123456:
             return SimpleNamespace(first_name="狼哥", username="luoyanglang")
         raise ValueError("unknown entity")
+
+
+class FakeMessageUserRefClient:
+    async def get_input_entity(self, entity_id):
+        return SimpleNamespace(id=entity_id)
+
+    async def __call__(self, request):
+        return [SimpleNamespace(first_name="狼哥", username="luoyanglang")]
+
+    async def get_entity(self, entity_id):
+        raise ValueError("entity lookup should not be needed")
+
+
+class FailingEntityClient:
+    async def get_input_entity(self, entity_id):
+        raise ValueError("input entity lookup failed")
+
+    async def __call__(self, request):
+        raise ValueError("request failed")
+
+    async def get_entity(self, entity_id):
+        raise ValueError("entity lookup failed")
 
 
 class MonitorPipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -92,6 +119,37 @@ class MonitorPipelineTests(unittest.IsolatedAsyncioTestCase):
         formatted = await self.manager._format_message(FakeMessage(), [keyword])
 
         self.assertIn('<a href="https://t.me/luoyanglang">狼哥</a>', formatted)
+
+    async def test_format_message_resolves_sender_from_message_reference(self):
+        self.manager = TelegramClientManager()
+        self.manager.client = FakeMessageUserRefClient()
+        keyword = SimpleNamespace(content="北京")
+
+        formatted = await self.manager._format_message(FakeMessage(), [keyword])
+
+        self.assertIn('<a href="https://t.me/luoyanglang">狼哥</a>', formatted)
+
+    async def test_format_message_uses_cached_username_for_min_sender(self):
+        self.manager = TelegramClientManager()
+        self.manager.client = FailingEntityClient()
+        keyword = SimpleNamespace(content="北京")
+
+        await self.manager._format_message(FakeMessageWithUsername(), [keyword])
+        formatted = await self.manager._format_message(FakeMessage(), [keyword])
+
+        self.assertIn('<a href="https://t.me/luoyanglang">狼哥</a>', formatted)
+
+    async def test_format_message_keeps_template_when_sender_lookup_fails(self):
+        self.manager = TelegramClientManager()
+        self.manager.client = FailingEntityClient()
+        keyword = SimpleNamespace(content="北京")
+
+        formatted = await self.manager._format_message(FakeMessage(), [keyword])
+
+        self.assertNotEqual("北京", formatted)
+        self.assertIn("用户:", formatted)
+        self.assertIn("来源:", formatted)
+        self.assertIn("命中关键词: 北京", formatted)
 
 
 def _async_return(value):

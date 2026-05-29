@@ -3,6 +3,7 @@ import unittest
 from core.utils import (
     build_telegram_html_link,
     build_telegram_user_html_link,
+    build_telegram_user_url,
     build_telegram_text_link,
     build_telegram_user_link,
     escape_html_text,
@@ -63,8 +64,17 @@ class UtilsTests(unittest.TestCase):
     def test_build_telegram_user_html_link_falls_back_to_user_id(self):
         self.assertEqual(
             build_telegram_user_html_link("Alice", user_id=123),
-            '<a href="tg://user?id=123">Alice</a>',
+            '<a href="tg://user?id=123">Alice</a> <code>123</code>',
         )
+
+    def test_build_telegram_user_url_prefers_username(self):
+        self.assertEqual(
+            build_telegram_user_url(username="@alice", user_id=123),
+            "https://t.me/alice",
+        )
+
+    def test_build_telegram_user_url_falls_back_to_user_id(self):
+        self.assertEqual(build_telegram_user_url(user_id=123), "tg://user?id=123")
 
     def test_escape_html_text_does_not_backslash_markdown_links(self):
         self.assertEqual(

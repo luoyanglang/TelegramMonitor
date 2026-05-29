@@ -6,6 +6,10 @@ All notable changes to Telegram Monitor will be documented in this file.
 
 ### Fixed
 
+- Fixed occasional raw-text forwarding when sender entity enrichment failed.
+- Made sender ID fallbacks visible when Telegram cannot resolve a sender username.
+- Resolved compact Telegram sender objects through message-context user references before falling back to sender IDs.
+- Reused cached sender usernames when Telegram later sends compact user objects without usernames.
 - Fixed Telegram release announcements not appearing in linked discussion groups by adding an opt-in discussion mirror.
 
 ## [2.2.2] - 2026-05-13

@@ -70,16 +70,30 @@ def build_telegram_html_link(label: object, url: str) -> str:
     return f'<a href="{escaped_url}">{escape_html_text(label)}</a>'
 
 
-def build_telegram_user_html_link(name: object, username: object = None, user_id: object = None) -> str:
-    """Build a best-effort Telegram HTML user link."""
-    display_name = name or "Unknown"
+def build_telegram_user_url(username: object = None, user_id: object = None) -> Optional[str]:
+    """Build the best available Telegram profile URL for a user."""
     if username:
         username_text = str(username).strip().lstrip("@")
         if username_text:
-            return build_telegram_html_link(display_name, f"https://t.me/{username_text}")
+            return f"https://t.me/{username_text}"
 
     if user_id not in (None, ""):
-        return build_telegram_html_link(display_name, f"tg://user?id={int(user_id)}")
+        return f"tg://user?id={int(user_id)}"
+
+    return None
+
+
+def build_telegram_user_html_link(name: object, username: object = None, user_id: object = None) -> str:
+    """Build a best-effort Telegram HTML user link."""
+    display_name = name or "Unknown"
+    username_url = build_telegram_user_url(username=username)
+    if username_url:
+        return build_telegram_html_link(display_name, username_url)
+
+    if user_id not in (None, ""):
+        user_id_text = str(int(user_id))
+        user_link = build_telegram_html_link(display_name, build_telegram_user_url(user_id=user_id_text))
+        return f'{user_link} <code>{user_id_text}</code>'
 
     return escape_html_text(display_name)
 

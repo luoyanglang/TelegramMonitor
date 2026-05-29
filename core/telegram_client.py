@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from decouple import config
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, types
 from telethon.errors import (
     EmailUnconfirmedError,
     PasswordHashInvalidError,
@@ -39,6 +39,7 @@ from core.utils import (
     build_telegram_user_html_link,
     escape_html_text,
     format_datetime,
+    mask_sensitive_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -381,6 +382,7 @@ class TelegramClientManager:
         self._http_client = None
         self._processed_messages: Dict[Tuple[int, int], float] = {}
         self._processed_messages_lock = asyncio.Lock()
+        self._username_cache: Dict[int, str] = {}
         
         # 用户和聊天缓存
         self.users: Dict[int, User] = {}
@@ -1115,20 +1117,25 @@ class TelegramClientManager:
         # 构建按钮
         keyboard = []
         
-        # 第一行：历史、屏蔽此人、屏蔽此群
+        # 第一行：原文
         row1 = []
         if source_chat_id and source_chat_id < 0:
             history_link = private_message_link(source_chat_id, message_id)
             if history_link:
                 row1.append(InlineKeyboardButton("👀 查看", url=history_link))
-        if sender_id:
-            row1.append(InlineKeyboardButton("🚫 屏蔽此人", callback_data=f"block_user_{sender_id}"))
-        if source_chat_id:
-            row1.append(InlineKeyboardButton("🚫 屏蔽此群", callback_data=f"block_chat_{source_chat_id}"))
         if row1:
             keyboard.append(row1)
+
+        # 第二行：屏蔽操作
+        block_row = []
+        if sender_id:
+            block_row.append(InlineKeyboardButton("🚫 屏蔽此人", callback_data=f"block_user_{sender_id}"))
+        if source_chat_id:
+            block_row.append(InlineKeyboardButton("🚫 屏蔽此群", callback_data=f"block_chat_{source_chat_id}"))
+        if block_row:
+            keyboard.append(block_row)
         
-        # 第二行：广告按钮
+        # 广告按钮
         try:
             from core.ad_integration import get_ad_buttons
             ad_button_configs = get_ad_buttons()
@@ -1187,6 +1194,38 @@ class TelegramClientManager:
             sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', 'Unknown')
             sender_username = getattr(sender, 'username', None)
             sender_id = message.sender_id
+            if sender_id and sender_username:
+                self._username_cache[int(sender_id)] = str(sender_username).lstrip("@")
+            elif sender_id:
+                sender_username = self._username_cache.get(int(sender_id))
+
+            if sender_id and not sender_username and self.client:
+                try:
+                    source_peer = await self.client.get_input_entity(message.chat_id)
+                    input_user = types.InputUserFromMessage(
+                        peer=source_peer,
+                        msg_id=message.id,
+                        user_id=sender_id,
+                    )
+                    users = await self.client(functions.users.GetUsersRequest([input_user]))
+                    if users:
+                        full_sender = users[0]
+                        sender_name = (
+                            getattr(full_sender, 'first_name', '')
+                            or getattr(full_sender, 'title', '')
+                            or sender_name
+                        )
+                        sender_username = getattr(full_sender, 'username', None) or sender_username
+                        if sender_username:
+                            self._username_cache[int(sender_id)] = str(sender_username).lstrip("@")
+                except Exception as e:
+                    logger.debug(
+                        "无法通过消息引用补全发送者信息: chat_id=%s, message_id=%s, sender_id=%s, error=%s",
+                        message.chat_id,
+                        message.id,
+                        mask_sensitive_id(sender_id),
+                        e,
+                    )
 
             if sender_id and not sender_username and self.client:
                 try:
@@ -1197,6 +1236,8 @@ class TelegramClientManager:
                         or sender_name
                     )
                     sender_username = getattr(full_sender, 'username', None) or sender_username
+                    if sender_username:
+                        self._username_cache[int(sender_id)] = str(sender_username).lstrip("@")
                 except Exception as e:
                     logger.debug(
                         "无法补全发送者信息: sender_id=%s, error=%s",
